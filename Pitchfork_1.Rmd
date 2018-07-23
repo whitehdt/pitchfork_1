@@ -9,11 +9,16 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+## Pitchfork Analysis Part 1
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Project Overview:
+Pitchfork is a music website out of Chicago, which is primarily known for their comprehensive reviews recently released music. While Pitchfork started off as an indie music publication (indie music stands for independent music, which is produced independently of commercial record label), it has morphed into an industry wide publication over the years. Critiques from Pitchfork are given in the form of a detailed evaluation, an album rating and an assigned ‘Best New Music’ award if the rating is high enough. These reviews are often considered the final word in the critique of music, however, despite shifting to an industry wide focus they’re still considered biased at times against non-indie artists. This analysis will look to examine which factors are indicative of positively (and negatively) reviewed albums and determine if Pitchfork has any noticeable biases in their critique of the music industry. 
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+Preliminary EDA:
+The dataset utilized contains over 18,000 reviews ranging in years from 1999 to 2017. Bias can be studied by examining changes in the ratings assigned for the years from 2000 thru 2016 (which contain complete records YTD). In order to determine evidence of bias against commercial artists, artists needed to be segmented into three artist classes; Established (artists with eight or more reviews since 2000), Semi-Established (artists with four or more reviews, but less than eight, since 2000), and New (artists with less than four reviews since 2000).
+
+The first analysis (below) of potential bias is an examination average ratings assigned and number of best new music awards given by artist class, year over year. The top panel of plot one shows that while Established artists consistently scored higher than New and Semi-Established artists throughout the 00’s, the average ratings of New artists have over taken Established artists by 2016. The bottom panel of plot one shows that while the best new music awards were distributed equally initially, the awards to New artists outpace existing artists by 650% by 2016. While average rating could provide some evidence of bias, best new music ratings are a clear indicator of bias.
+
 
 ```{r cars}
 # libraries
@@ -61,21 +66,15 @@ mod_era <- pitchfork_master[which(pitchfork_master[,'year']>1999 & pitchfork_mas
   # remove global as it does not have enough records to be considered for average
 mod_era <- mod_era[which(mod_era[,'genre']!='global'),]
 
-  # create counts table of reviews by genre ~ year
-table(mod_era$genre, mod_era$year)
-
   # create summary table of average score by genre ~ year
 avg_rating_year <- as.data.frame(aggregate(mod_era[, "score"], list(mod_era$genre, mod_era$year), mean))
-avg_rating_year
 
   # graph of avg score by genre YoY
 p0 <- ggplot(data = avg_rating_year, aes(x = Group.2, y = x, colour = Group.1)) +       
   geom_line(aes(group = Group.1)) + geom_point() + xlab("Year") + ylab("Score") + 
   ggtitle("Avg Score by Genre YoY") + theme(plot.title = element_text(hjust = 0.5))
-p0
 
   # create list of artists with over 10 reviews
-table(mod_era$artist)
 artist_count_df <- as.data.frame(table(mod_era$artist))
 colnames(artist_count_df)[1] <- 'artist'
 artist_count_df <- artist_count_df[artist_count_df$Freq >= 4,]
@@ -83,19 +82,14 @@ artist_count_df$established.rating <- NA
 artist_count_df[artist_count_df$Freq >= 8, 3] <- 'Established'
 artist_count_df$established.rating[is.na(artist_count_df$established.rating)] <- 'Semi-Established'
 artist_count_df <- artist_count_df[-2]
-artist_count_df
 
   # join list of established artists
 mod_era <- join(mod_era, artist_count_df, by = 'artist', type='left')
 mod_era$established.rating[is.na(mod_era$established.rating)] <- 'New'
 
-  # create counts table of reviews by author ~ year
-table(mod_era$established.rating, mod_era$year)
-
   # create summary table of average score by genre ~ author
 avg_rating_year_established <- as.data.frame(aggregate(mod_era[, "score"], list(mod_era$year, 
                                                                                           mod_era$established.rating), mean))
-avg_rating_year_established
 
   # create plot of avg score by establishment rating YoY
 p1 <- ggplot(data = avg_rating_year_established, aes(x = Group.1, y = x, colour = Group.2)) +       
@@ -105,7 +99,6 @@ p1 <- ggplot(data = avg_rating_year_established, aes(x = Group.1, y = x, colour 
   # create summary table of average score by genre ~ author
 bnm_count_year_established <- as.data.frame(aggregate(mod_era[, "best_new_music"], list(mod_era$year, 
                                                                                 mod_era$established.rating), sum))
-bnm_count_year_established
 
   # create plot of avg score by establishment rating YoY
 p2 <- ggplot(data = bnm_count_year_established, aes(x = Group.1, y = x, colour = Group.2)) +       
@@ -138,49 +131,3 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 }
 multiplot(p1, p2, cols=1)
 ```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-  # create separate df for each of establishment rating
-mod_era_established <- mod_era[mod_era$established.rating == 'Established',]
-mod_era_semi_established <- mod_era[mod_era$established.rating == 'Semi-Established',]
-mod_era_new <- mod_era[mod_era$established.rating == 'New',]
-
-  # create summary table of number of reviews by genre ~ year, for each of the establishment rating datasets
-bnm_count_year_genre <- as.data.frame(aggregate(mod_era[, "best_new_music"], 
-                                                             list(mod_era$year, mod_era$genre), sum))
-
-  # create summary table of best new music bu genre ~ year, for each of the establishment rating datasets
-established_bnm_count_year_genre <- as.data.frame(aggregate(mod_era_established[, "best_new_music"], 
-                                                             list(mod_era_established$year, mod_era_established$genre), sum))
-semi_established_bnm_count_year_genre <- as.data.frame(aggregate(mod_era_semi_established[, "best_new_music"], 
-                                                             list(mod_era_semi_established$year, mod_era_semi_established$genre), sum))
-new_bnm_count_year_genre <- as.data.frame(aggregate(mod_era_new[, "best_new_music"], list(mod_era_new$year, mod_era_new$genre), sum))
-
-
-  # create plot of best new music by genre YoY
-p3 <- ggplot(data = bnm_count_year_genre, aes(x = Group.1, y = x, colour = Group.2)) +       
-  geom_line(aes(group = Group.2)) + geom_point() + xlab("Year") + ylab("Count of Reviews") + 
-  ggtitle("All Artists: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
-
-  # create plot of best new music by establishment rating YoY
-p4 <- ggplot(data = established_bnm_count_year_genre, aes(x = Group.1, y = x, colour = Group.2)) +       
-  geom_line(aes(group = Group.2)) + geom_point() + xlab("Year") + ylab("Count of Best New Music") + 
-  ggtitle("Established: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
-
-p5 <- ggplot(data = semi_established_bnm_count_year_genre, aes(x = Group.1, y = x, colour = Group.2)) +       
-  geom_line(aes(group = Group.2)) + geom_point() + xlab("Year") + ylab("Count of Best New Music") + 
-  ggtitle("Semi_Established: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
-
-p6 <- ggplot(data = new_bnm_count_year_genre, aes(x = Group.1, y = x, colour = Group.2)) +       
-  geom_line(aes(group = Group.2)) + geom_point() + xlab("Year") + ylab("Count of Best New Music") + 
-  ggtitle("New: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
-
-  # display plots 3 - 6
-multiplot(p3, p4, p5, p6, cols=1)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
