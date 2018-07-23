@@ -1,0 +1,222 @@
+---
+title: "Pitchfork_2"
+author: "Drew Whitehead"
+date: "7/22/2018"
+output: 
+  html_document:
+    keep_md: true
+---
+
+
+
+## Pitchfork Analysis Part 2
+
+The second analysis (below) provides a deeper dive into the distribution of the best new music award by adding genre as a classification, year over year. The top panel of plot two shows the distribution of awards by genre for all artists for the period 2000 thru 20016, while the bottom three panels show the same distribution for each of the three artist classes. It’s clear that Rock genre is the dominant recipient of the best new music award, but the awards given by artist class is skewed. While Established and Semi-Established artists received a majority of the awards in thru the year 2010, the number of awards given after dropped off significantly, with New artists receiving a significant majority of the awards in not only Rock, but also Pop/R&B, Experimental and Rap.
+
+Proposed Formal Analysis:
+While there appears to be a bias on some level, a deeper dive into the content of the actual reviews is required to examine some of the factors which are positively correlated with a positive review and a best new music award. Python can be leveraged to identify key words and phrases which could be positively correlated with a positive review. From the analysis of the text, a prediction model and classification model could be built to identify which factors are most significant to the review score and receipt of best new music award.
+
+
+
+```r
+# libraries
+library(ggplot2)
+library(RSQLite)
+library(xlsx)
+```
+
+```
+## Loading required package: rJava
+```
+
+```
+## Loading required package: xlsxjars
+```
+
+```r
+library(dplyr)
+```
+
+```
+## 
+## Attaching package: 'dplyr'
+```
+
+```
+## The following objects are masked from 'package:stats':
+## 
+##     filter, lag
+```
+
+```
+## The following objects are masked from 'package:base':
+## 
+##     intersect, setdiff, setequal, union
+```
+
+```r
+library(plyr)
+```
+
+```
+## -------------------------------------------------------------------------
+```
+
+```
+## You have loaded plyr after dplyr - this is likely to cause problems.
+## If you need functions from both plyr and dplyr, please load plyr first, then dplyr:
+## library(plyr); library(dplyr)
+```
+
+```
+## -------------------------------------------------------------------------
+```
+
+```
+## 
+## Attaching package: 'plyr'
+```
+
+```
+## The following objects are masked from 'package:dplyr':
+## 
+##     arrange, count, desc, failwith, id, mutate, rename, summarise,
+##     summarize
+```
+
+```r
+  # set working directory to sqlite db and connect
+setwd("/Users/drewwhitehead/sqlite/")
+con <- dbConnect(SQLite(), dbname="pitchfork.sqlite")
+
+  # return table names
+alltables <- dbListTables(con)
+
+  # qurey each table name and assign to object
+artists <- dbGetQuery(con, 'select * from artists')
+genres <- dbGetQuery(con, 'select * from genres')
+reviews <- dbGetQuery(con, 'select * from reviews')
+labels <- dbGetQuery(con, 'select * from labels')
+years <- dbGetQuery(con, 'select * from years')
+dbDisconnect(con)
+#content <- read.csv("Solo Projects/Exported CSV Files/content.csv", header = T)
+
+  # create master dataframe from sqlite output
+pitchfork_master <- merge(artists, genres)
+pitchfork_master <- merge(pitchfork_master, reviews)
+pitchfork_master <- merge(pitchfork_master, labels)
+pitchfork_master <- merge(pitchfork_master, years)
+
+  # set working directory back to normal
+setwd("/Users/drewwhitehead/Documents/Northwestern/R-Studio/")
+
+  # write cluster results to excel file
+#write.xlsx(pitchfork_master, file = "Solo Projects/Pitchfork Master.xlsx")
+
+# remove all duplicates from master file
+pitchfork_master <- pitchfork_master[!duplicated(pitchfork_master$reviewid),]
+nrow(pitchfork_master)
+```
+
+```
+## [1] 18002
+```
+
+```r
+  # create subset df of all reviews past '99 called mod_era
+mod_era <- pitchfork_master[which(pitchfork_master[,'year']>1999 & pitchfork_master[,'year']<2017),]
+
+  # remove global as it does not have enough records to be considered for average
+mod_era <- mod_era[which(mod_era[,'genre']!='global'),]
+
+  # create summary table of average score by genre ~ year
+avg_rating_year <- as.data.frame(aggregate(mod_era[, "score"], list(mod_era$genre, mod_era$year), mean))
+
+  # graph of avg score by genre YoY
+p0 <- ggplot(data = avg_rating_year, aes(x = Group.2, y = x, colour = Group.1)) +       
+  geom_line(aes(group = Group.1)) + geom_point() + xlab("Year") + ylab("Score") + 
+  ggtitle("Avg Score by Genre YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+  # create list of artists with over 10 reviews
+artist_count_df <- as.data.frame(table(mod_era$artist))
+colnames(artist_count_df)[1] <- 'artist'
+artist_count_df <- artist_count_df[artist_count_df$Freq >= 4,]
+artist_count_df$established.rating <- NA
+artist_count_df[artist_count_df$Freq >= 8, 3] <- 'Established'
+artist_count_df$established.rating[is.na(artist_count_df$established.rating)] <- 'Semi-Established'
+artist_count_df <- artist_count_df[-2]
+
+  # join list of established artists
+mod_era <- join(mod_era, artist_count_df, by = 'artist', type='left')
+mod_era$established.rating[is.na(mod_era$established.rating)] <- 'New'
+
+  # create separate df for each of establishment rating
+mod_era_established <- mod_era[mod_era$established.rating == 'Established',]
+mod_era_semi_established <- mod_era[mod_era$established.rating == 'Semi-Established',]
+mod_era_new <- mod_era[mod_era$established.rating == 'New',]
+
+  # create summary table of number of reviews by genre ~ year, for each of the establishment rating datasets
+bnm_count_year_genre <- as.data.frame(aggregate(mod_era[, "best_new_music"], 
+                                                             list(mod_era$year, mod_era$genre), sum))
+
+  # create summary table of best new music bu genre ~ year, for each of the establishment rating datasets
+established_bnm_count_year_genre <- as.data.frame(aggregate(mod_era_established[, "best_new_music"], 
+                                                             list(mod_era_established$year, mod_era_established$genre), sum))
+semi_established_bnm_count_year_genre <- as.data.frame(aggregate(mod_era_semi_established[, "best_new_music"], 
+                                                             list(mod_era_semi_established$year, mod_era_semi_established$genre), sum))
+new_bnm_count_year_genre <- as.data.frame(aggregate(mod_era_new[, "best_new_music"], list(mod_era_new$year, mod_era_new$genre), sum))
+
+
+  # create plot of best new music by genre YoY
+p3 <- ggplot(data = bnm_count_year_genre, aes(x = Group.1, y = x, colour = Group.2)) +       
+  geom_line(aes(group = Group.2)) + geom_point() + xlab("Year") + ylab("Count of Reviews") + 
+  ggtitle("All Artists: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+  # create plot of best new music by establishment rating YoY
+p4 <- ggplot(data = established_bnm_count_year_genre, aes(x = Group.1, y = x, colour = Group.2)) +       
+  geom_line(aes(group = Group.2)) + geom_point() + xlab("Year") + ylab("Count of Best New Music") + 
+  ggtitle("Established: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+p5 <- ggplot(data = semi_established_bnm_count_year_genre, aes(x = Group.1, y = x, colour = Group.2)) +       
+  geom_line(aes(group = Group.2)) + geom_point() + xlab("Year") + ylab("Count of Best New Music") + 
+  ggtitle("Semi_Established: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+p6 <- ggplot(data = new_bnm_count_year_genre, aes(x = Group.1, y = x, colour = Group.2)) +       
+  geom_line(aes(group = Group.2)) + geom_point() + xlab("Year") + ylab("Count of Best New Music") + 
+  ggtitle("New: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+
+  # display plots 3 - 6
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+  plots <- c(list(...), plotlist)
+  numPlots = length(plots)
+  if (is.null(layout)) {
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+  
+  if (numPlots==1) {
+    print(plots[[1]])
+    
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+    for (i in 1:numPlots) {
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+multiplot(p3, p4, cols=1)
+```
+
+![](Pitchfork_2_files/figure-html/cars-1.png)<!-- -->
+
+```r
+multiplot(p5, p6, cols=1)
+```
+
+![](Pitchfork_2_files/figure-html/cars-2.png)<!-- -->
