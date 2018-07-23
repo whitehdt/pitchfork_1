@@ -2,7 +2,7 @@
 title: "Pitchfork_1"
 author: "Drew Whitehead"
 date: "7/22/2018"
-output: html_document
+output: rmarkdown::github_document
 ---
 
 ```{r setup, include=FALSE}
