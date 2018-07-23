@@ -7,9 +7,7 @@ output:
     keep_md: true
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
+
 
 ## Pitchfork Analysis Part 1
 
@@ -22,14 +20,74 @@ The dataset utilized contains over 18,000 reviews ranging in years from 1999 to 
 The first analysis (below) of potential bias is an examination average ratings assigned and number of best new music awards given by artist class, year over year. The top panel of plot one shows that while Established artists consistently scored higher than New and Semi-Established artists throughout the 00’s, the average ratings of New artists have over taken Established artists by 2016. The bottom panel of plot one shows that while the best new music awards were distributed equally initially, the awards to New artists outpace existing artists by 650% by 2016. While average rating could provide some evidence of bias, best new music ratings are a clear indicator of bias.
 
 
-```{r cars}
+
+```r
 # libraries
 library(ggplot2)
 library(RSQLite)
 library(xlsx)
-library(dplyr)
-library(plyr)
+```
 
+```
+## Loading required package: rJava
+```
+
+```
+## Loading required package: xlsxjars
+```
+
+```r
+library(dplyr)
+```
+
+```
+## 
+## Attaching package: 'dplyr'
+```
+
+```
+## The following objects are masked from 'package:stats':
+## 
+##     filter, lag
+```
+
+```
+## The following objects are masked from 'package:base':
+## 
+##     intersect, setdiff, setequal, union
+```
+
+```r
+library(plyr)
+```
+
+```
+## -------------------------------------------------------------------------
+```
+
+```
+## You have loaded plyr after dplyr - this is likely to cause problems.
+## If you need functions from both plyr and dplyr, please load plyr first, then dplyr:
+## library(plyr); library(dplyr)
+```
+
+```
+## -------------------------------------------------------------------------
+```
+
+```
+## 
+## Attaching package: 'plyr'
+```
+
+```
+## The following objects are masked from 'package:dplyr':
+## 
+##     arrange, count, desc, failwith, id, mutate, rename, summarise,
+##     summarize
+```
+
+```r
   # set working directory to sqlite db and connect
 setwd("/Users/drewwhitehead/sqlite/")
 con <- dbConnect(SQLite(), dbname="pitchfork.sqlite")
@@ -61,7 +119,13 @@ setwd("/Users/drewwhitehead/Documents/Northwestern/R-Studio/")
 # remove all duplicates from master file
 pitchfork_master <- pitchfork_master[!duplicated(pitchfork_master$reviewid),]
 nrow(pitchfork_master)
+```
 
+```
+## [1] 18002
+```
+
+```r
   # create subset df of all reviews past '99 called mod_era
 mod_era <- pitchfork_master[which(pitchfork_master[,'year']>1999 & pitchfork_master[,'year']<2017),]
 
@@ -133,3 +197,5 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 }
 multiplot(p1, p2, cols=1)
 ```
+
+![](Pitchfork_1_files/figure-html/cars-1.png)<!-- -->
