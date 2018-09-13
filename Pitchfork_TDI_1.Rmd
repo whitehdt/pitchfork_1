@@ -1,0 +1,523 @@
+---
+title: "Pitchfork_TDI_1"
+author: "Drew Whitehead"
+date: "9/12/2018"
+output: 
+  html_document:
+    keep_md: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Checkpoint Status - 9/12/2018
+
+Below is the work that has been completed on the statistical analysis in R
+
+```{r, eval = TRUE, echo = FALSE, message = FALSE, warning = FALSE}
+
+# libraries
+library(ggplot2)
+library(RSQLite)
+library(xlsx)
+library(dplyr)
+library(plyr)
+library(zoo)
+library(randomForest)
+
+########## Challenge Work ##########
+
+##### Load Kaggle / Python Data #####
+  # set working directory to sqlite db and connect
+setwd("/Users/drewwhitehead/Documents/The Data Incubator/Pitchfork Project/SQL Database")
+con <- dbConnect(SQLite(), dbname="pitchfork.sqlite")
+
+  # return table names
+dbListTables(con)
+
+  # qurey each table name and assign to object
+#artists <- dbGetQuery(con, 'select * from artists')
+#genres <- dbGetQuery(con, 'select * from genres')
+#reviews <- dbGetQuery(con, 'select * from reviews')
+#labels <- dbGetQuery(con, 'select * from labels')
+#years <- dbGetQuery(con, 'select * from years')
+#content <- dbGetQuery(con, 'select * from content')
+text_analysis <- dbGetQuery(con, 'select * from text_analysis') # only load after python work completed
+dbDisconnect(con)
+
+# set working directory back to normal
+setwd("/Users/drewwhitehead/pitchfork_1")
+
+  # create master dataframe from sqlite output (artists excluded due to collabs)
+pitchfork_master <- text_analysis
+colnames(pitchfork_master)[15] <- "release_year"
+nrow(pitchfork_master)
+
+  # create reference dataframe
+#pitchfork_master_ref <- pitchfork_master[1:100,]
+
+  # write reference dataframe to csv file
+#write.csv(pitchfork_master_ref, file = "Pitchfork_Master_Ref.csv")
+
+  # create subset df of all reviews past '99 called mod_era
+mod_era <- pitchfork_master[which(pitchfork_master[,'pub_year']>1999 & pitchfork_master[,'pub_year']<2017),]
+
+  # remove global as it does not have enough records to be considered for average
+mod_era <- mod_era[which(mod_era[,'genre']!='global'),]
+
+  # add average rating by year to mod_era
+pub_year_avg_score <- as.data.frame(aggregate(mod_era[, "score"], list(mod_era$pub_year), mean))
+colnames(pub_year_avg_score) <- c('pub_year','yearly_avg_rating')
+mod_era <- merge(mod_era, pub_year_avg_score, by = 'pub_year')
+
+  # create variable for if the rating was above or below average rating in pub_year
+mod_era$abv_blw_yr_avg_rat <- as.integer(ifelse(mod_era$score >= mod_era$yearly_avg_rating, 1, 0))
+
+  # create counts table of reviews by genre ~ pub_year
+table(mod_era$genre, mod_era$pub_year)
+
+  # create list of artists with over 3 reviews
+artist_count_df <- as.data.frame(table(mod_era$artist))
+colnames(artist_count_df)[1] <- 'artist'
+artist_count_df <- artist_count_df[artist_count_df$Freq >= 4,]
+artist_count_df$established.rating <- NA
+artist_count_df[artist_count_df$Freq >= 8, 3] <- 'Established'
+artist_count_df$established.rating[is.na(artist_count_df$established.rating)] <- 'Semi-Established'
+artist_count_df <- artist_count_df[-2]
+table(artist_count_df$established.rating)
+
+  # join list of established artists
+mod_era <- join(mod_era, artist_count_df, by = 'artist', type='left')
+table(mod_era$established.rating)
+mod_era$established.rating[is.na(mod_era$established.rating)] <- 'New'
+table(mod_era$established.rating)
+
+  # create counts table of reviews by establishment rating ~ pub_year
+table(mod_era$established.rating, mod_era$pub_year)
+
+
+
+##### Rating By Genre #####
+
+  # create summary table of average score by genre ~ pub_year
+avg_rating_pub_year <- as.data.frame(aggregate(mod_era[, "score"], list(mod_era$genre, mod_era$pub_year, mod_era$yearly_avg_rating), mean))
+colnames(avg_rating_pub_year) <- c('Genre','Pub_Year','Yearly_Avg_Rating','Avg_Rating')
+
+  # graph of avg score by genre YoY
+p0 <- ggplot(data = avg_rating_pub_year, aes(x = Pub_Year, y = Avg_Rating, colour = Genre)) +       
+  geom_line(aes(group = Genre)) + geom_point() + geom_line(aes(y=Yearly_Avg_Rating), color = 'red4', linetype = 2) +
+  xlab('Pub_Year') + ylab("Score") + ggtitle("Avg Score by Genre YoY") + theme(plot.title = element_text(hjust = 0.5))
+p0
+
+##### Rating and Count of Best New Music: By Establishment Rating #####
+
+  # create summary table of avg score by establishment rating YoY
+avg_rating_pub_year_established <- as.data.frame(aggregate(mod_era[, "score"], list(mod_era$pub_year, mod_era$established.rating,
+                                                                                    mod_era$yearly_avg_rating), mean))
+colnames(avg_rating_pub_year_established) <- c('Pub_Year','Establishment_Rating','Yearly_Avg_Rating','Avg_Rating')
+
+  # create plot of avg score by establishment rating YoY
+p1 <- ggplot(data = avg_rating_pub_year_established, aes(x = Pub_Year, y = Avg_Rating, colour = Establishment_Rating)) +       
+  geom_line(aes(group = Establishment_Rating)) + geom_point() + 
+  geom_line(aes(y=Yearly_Avg_Rating), color = 'red4', linetype = 2) + xlab('Pub_Year') + ylab("Score") + 
+  ggtitle("Avg Score by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+  # create summary table of count of best new music reviews by establishment rating YoY
+bnm_count_pub_year_established <- as.data.frame(aggregate(mod_era[, "best_new_music"], list(mod_era$pub_year, mod_era$established.rating), sum))
+colnames(bnm_count_pub_year_established) <- c('Pub_Year','Establishment_Rating','Count_BNM')
+
+# display plots 0 and 1
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+  plots <- c(list(...), plotlist)
+  numPlots = length(plots)
+  if (is.null(layout)) {
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                     ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+  
+  if (numPlots==1) {
+    print(plots[[1]])
+    
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+    for (i in 1:numPlots) {
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+multiplot(p0, p1, cols=1)
+
+
+  # create plot of count of best new music reviews by establishment rating YoY
+#p2 <- ggplot(data = bnm_count_pub_year_established, aes(x = Pub_Year, y = Count_BNM, colour = Establishment_Rating)) +       
+#  geom_line(aes(group = Establishment_Rating)) + geom_point() + 
+#  geom_line(aes(y=Yearly_Avg_BNM), color = 'red4', linetype = 2) + xlab('Pub_Year') + ylab("Count of Best New Music") + 
+#  ggtitle("Count of Best New Music by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+p2 <- ggplot(data = bnm_count_pub_year_established, aes(x = Pub_Year, y = Count_BNM, fill = Establishment_Rating)) +       
+  geom_area(aes(group = Establishment_Rating)) + xlab('Pub_Year') + ylab("Count of Best New Music") + 
+  ggtitle("Count of Best New Music by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+p2
+
+
+##### Count of Best New Music: By Genre (Establishment Rating) #####
+
+  # create separate df for each of establishment rating
+mod_era_established <- mod_era[mod_era$established.rating == 'Established',]
+mod_era_semi_established <- mod_era[mod_era$established.rating == 'Semi-Established',]
+mod_era_new <- mod_era[mod_era$established.rating == 'New',]
+
+  # create summary table of number of reviews by genre ~ pub_year, for each of the establishment rating datasets
+bnm_count_pub_year_genre <- as.data.frame(aggregate(mod_era[, "best_new_music"], 
+                                                             list(mod_era$pub_year, mod_era$genre), sum))
+colnames(bnm_count_pub_year_genre) <- c('Pub_Year','Genre','Count_BNM')
+
+  # create summary table of best new music bu genre ~ pub_year, for each of the establishment rating datasets
+established_bnm_count_pub_year_genre <- as.data.frame(aggregate(mod_era_established[, "best_new_music"], 
+                                                             list(mod_era_established$pub_year, mod_era_established$genre), sum))
+semi_established_bnm_count_pub_year_genre <- as.data.frame(aggregate(mod_era_semi_established[, "best_new_music"], 
+                                                             list(mod_era_semi_established$pub_year, mod_era_semi_established$genre), sum))
+new_bnm_count_pub_year_genre <- as.data.frame(aggregate(mod_era_new[, "best_new_music"], list(mod_era_new$pub_year, mod_era_new$genre), sum))
+colnames(established_bnm_count_pub_year_genre) <- c('Pub_Year','Genre','Count_BNM')
+colnames(semi_established_bnm_count_pub_year_genre) <- c('Pub_Year','Genre','Count_BNM')
+colnames(new_bnm_count_pub_year_genre) <- c('Pub_Year','Genre','Count_BNM')
+
+  # create plot of best new music by genre YoY
+p3 <- ggplot(data = bnm_count_pub_year_genre, aes(x = Pub_Year, y = Count_BNM, fill = Genre)) +       
+  geom_area(aes(group = Genre)) + xlab('Pub_Year') + ylab("Count of Best New Music") + 
+  ggtitle("Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+  # create plot of best new music by establishment rating YoY
+p4 <- ggplot(data = established_bnm_count_pub_year_genre, aes(x = Pub_Year, y = Count_BNM, fill = Genre)) +       
+  geom_area(aes(group = Genre)) + xlab('Pub_Year') + ylab("Count of Best New Music") + 
+  ggtitle("Established: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+p5 <- ggplot(data = semi_established_bnm_count_pub_year_genre, aes(x = Pub_Year, y = Count_BNM, fill = Genre)) +       
+  geom_area(aes(group = Genre)) + xlab('Pub_Year') + ylab("Count of Best New Music") + 
+  ggtitle("Semi_Established: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+p6 <- ggplot(data = new_bnm_count_pub_year_genre, aes(x = Pub_Year, y = Count_BNM, fill = Genre)) +       
+  geom_area(aes(group = Genre)) + xlab('Pub_Year') + ylab("Count of Best New Music") + 
+  ggtitle("New: Count of Best New Music by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+  # display plots 3 - 6
+multiplot(p3, p4, cols=1)
+multiplot(p5, p6, cols=1)
+
+
+
+
+########## Interview Work ##########
+
+##### Count Reviews: By Genre (Establishment Rating) #####
+
+# create summary table of number of reviews by genre ~ pub_year, for each of the establishment rating datasets
+reviews_count_pub_year_genre <- as.data.frame(aggregate(mod_era[, "artist"], 
+                                                list(mod_era$pub_year, mod_era$genre), length))
+colnames(reviews_count_pub_year_genre) <- c('Pub_Year','Genre','Count_Reviews')
+
+# create summary table of best new music bu genre ~ pub_year, for each of the establishment rating datasets
+established_reviews_count_pub_year_genre <- as.data.frame(aggregate(mod_era_established[, "artist"], 
+                                                            list(mod_era_established$pub_year, mod_era_established$genre), length))
+semi_established_reviews_count_pub_year_genre <- as.data.frame(aggregate(mod_era_semi_established[, "artist"], 
+                                                                 list(mod_era_semi_established$pub_year, mod_era_semi_established$genre), length))
+new_reviews_count_pub_year_genre <- as.data.frame(aggregate(mod_era_new[, "artist"], list(mod_era_new$pub_year, mod_era_new$genre), length))
+colnames(established_reviews_count_pub_year_genre) <- c('Pub_Year','Genre','Count_Reviews')
+colnames(semi_established_reviews_count_pub_year_genre) <- c('Pub_Year','Genre','Count_Reviews')
+colnames(new_reviews_count_pub_year_genre) <- c('Pub_Year','Genre','Count_Reviews')
+
+
+# create plot of count of reviews by genre YoY
+p7 <- ggplot(data = reviews_count_pub_year_genre, aes(x = Pub_Year, y = Count_Reviews, fill = Genre)) +       
+  geom_area(aes(group = Genre)) + xlab('Pub_Year') + ylab("Count of Reviews") + 
+  ggtitle("Count of Reviews by Genre YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+# create plot of count of reviews by establishment rating YoY
+p8 <- ggplot(data = established_reviews_count_pub_year_genre, aes(x = Pub_Year, y = Count_Reviews, fill = Genre)) +       
+  geom_area(aes(group = Genre)) + xlab('Pub_Year') + ylab("Count of Reviews") + 
+  ggtitle("Established: Count of Reviews by Genre YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+p9 <- ggplot(data = semi_established_reviews_count_pub_year_genre, aes(x = Pub_Year, y = Count_Reviews, fill = Genre)) +       
+  geom_area(aes(group = Genre)) + xlab('Pub_Year') + ylab("Count of Reviews") + 
+  ggtitle("Semi_Established: Count of Reviews by Genre YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+p10 <- ggplot(data = new_reviews_count_pub_year_genre, aes(x = Pub_Year, y = Count_Reviews, fill = Genre)) +       
+  geom_area(aes(group = Genre)) + xlab('Pub_Year') + ylab("Count of Reviews") + 
+  ggtitle("New: Count of Reviews by Genre YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+# display plots 7 - 10
+multiplot(p7, p8, cols=1)
+multiplot(p9, p10, cols=1)
+
+
+##### Best New Music / Count Reviews: By Genre (Establishment Rating) #####
+
+# create table of percentage of BNM awards won to reviews written by genre YoY
+bnm.reviews_count_pub_year_genre <- merge(bnm_count_pub_year_genre,reviews_count_pub_year_genre, by=c('Pub_Year', 'Genre'))
+bnm.reviews_count_pub_year_genre$BNM_Review <- bnm.reviews_count_pub_year_genre$Count_BNM/bnm.reviews_count_pub_year_genre$Count_Reviews
+
+# create table of percentage of BNM awards won to reviews written by genre YoY, for each of the establishment rating datasets
+established_bnm.reviews_count_pub_year_genre <- merge(established_bnm_count_pub_year_genre,established_reviews_count_pub_year_genre, by=c('Pub_Year', 'Genre'))
+established_bnm.reviews_count_pub_year_genre$BNM_Review <- established_bnm.reviews_count_pub_year_genre$Count_BNM/
+  established_bnm.reviews_count_pub_year_genre$Count_Reviews
+
+semi_established_bnm.reviews_count_pub_year_genre <- merge(semi_established_bnm_count_pub_year_genre,semi_established_reviews_count_pub_year_genre, by=c('Pub_Year', 'Genre'))
+semi_established_bnm.reviews_count_pub_year_genre$BNM_Review <- semi_established_bnm.reviews_count_pub_year_genre$Count_BNM/
+  semi_established_bnm.reviews_count_pub_year_genre$Count_Reviews
+
+new_bnm.reviews_count_pub_year_genre <- merge(new_bnm_count_pub_year_genre,new_reviews_count_pub_year_genre, by=c('Pub_Year', 'Genre'))
+new_bnm.reviews_count_pub_year_genre$BNM_Review <- new_bnm.reviews_count_pub_year_genre$Count_BNM/new_bnm.reviews_count_pub_year_genre$Count_Reviews
+
+# create plot of percentage of BNM awards given to reviews written by genre YoY
+p11 <- ggplot(data = bnm.reviews_count_pub_year_genre, aes(x = Pub_Year, y = BNM_Review, colour = Genre)) +       
+  geom_line(aes(group = Genre)) + geom_point() + xlab('Pub_Year') + ylab("BNM Rate") + 
+  ggtitle("Rate of Best New Music Awards Given by Genre Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+# create plot of percentage of BNM awards given to reviews written by genre YoY, for each of the establishment rating datasets
+p12 <- ggplot(data = established_bnm.reviews_count_pub_year_genre, aes(x = Pub_Year, y = BNM_Review, colour = Genre)) +       
+  geom_line(aes(group = Genre)) + geom_point() + xlab('Pub_Year') + ylab("BNM Rate") + 
+  ggtitle("Established: Rate of Best New Music Awards Given YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+p13 <- ggplot(data = semi_established_bnm.reviews_count_pub_year_genre, aes(x = Pub_Year, y = BNM_Review, colour = Genre)) +       
+  geom_line(aes(group = Genre)) + geom_point() + xlab('Pub_Year') + ylab("BNM Rate") + 
+  ggtitle("Semi_Established: Rate of Best New Music Awards Given YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+p14 <- ggplot(data = new_bnm.reviews_count_pub_year_genre, aes(x = Pub_Year, y = BNM_Review, colour = Genre)) +       
+  geom_line(aes(group = Genre)) + geom_point() + xlab('Pub_Year') + ylab("BNM Rate") + 
+  ggtitle("New: Rate of Best New Music Awards Given YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+# display plots 11 - 14
+multiplot(p11, p12, cols=1)
+multiplot(p13, p14, cols=1)
+
+
+##### Count Reviews, Best New Music, Best New Music / Count Reviews: By Establishment Rating #####
+
+# create summary table of number of reviews by establishment rating YoY
+reviews_count_pub_year_established <- as.data.frame(aggregate(mod_era[, "artist"], list(mod_era$pub_year, 
+                                                                                        mod_era$established.rating), length))
+colnames(reviews_count_pub_year_established) <- c('Pub_Year','Establishment_Rating','Count_Reviews')
+
+# create plot of number of reviews by establishment rating YoY
+p15 <- ggplot(data = reviews_count_pub_year_established, aes(x = Pub_Year, y = Count_Reviews, fill = Establishment_Rating)) +       
+  geom_area(aes(group = Establishment_Rating)) + xlab('Pub_Year') + ylab("Count of Reviews") + 
+  ggtitle("Count of Reviews by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+
+# create table of percentage of BNM awards won to reviews written by genre YoY
+bnm.reviews_count_pub_year_established <- merge(bnm_count_pub_year_established,reviews_count_pub_year_established, by=c('Pub_Year', 'Establishment_Rating'))
+bnm.reviews_count_pub_year_established$BNM_Review <- bnm.reviews_count_pub_year_established$Count_BNM/bnm.reviews_count_pub_year_established$Count_Reviews
+
+# create plot of percentage of BNM awards won to reviews written by genre YoY
+p16 <- ggplot(data = bnm.reviews_count_pub_year_established, aes(x = Pub_Year, y = BNM_Review, colour = Establishment_Rating)) +       
+  geom_line(aes(group = Establishment_Rating)) + geom_point() + xlab('Pub_Year') + ylab("BNM Rate") + 
+  ggtitle("Rate of Best New Music Awards Given by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+# display plots 2 & 15
+multiplot(p15, p2, p16, cols=1)
+
+
+
+
+##### ROCK GENRE - Count Reviews, Best New Music, Best New Music / Count Reviews: By Establishment Rating #####
+
+# create mod era rock df, and subsequently count reviews and bnm count
+mod_era_ROCK <- mod_era[mod_era$genre == 'rock',]
+reviews_count_pub_year_established_ROCK <- as.data.frame(aggregate(mod_era_ROCK[, "artist"], 
+                                                              list(mod_era_ROCK$pub_year, mod_era_ROCK$established.rating), length))
+colnames(reviews_count_pub_year_established_ROCK) <- c('Pub_Year','Establishment_Rating','Count_Reviews')
+bnm_count_pub_year_established_ROCK <- as.data.frame(aggregate(mod_era_ROCK[, "best_new_music"], 
+                                                           list(mod_era_ROCK$pub_year, mod_era_ROCK$established.rating), sum))
+colnames(bnm_count_pub_year_established_ROCK) <- c('Pub_Year','Establishment_Rating','Count_BNM')
+
+# create table of percentage of BNM awards won to reviews written by genre YoY
+bnm.reviews_count_pub_year_established_ROCK <- merge(bnm_count_pub_year_established_ROCK,reviews_count_pub_year_established_ROCK
+                                                 , by=c('Pub_Year', 'Establishment_Rating'))
+bnm.reviews_count_pub_year_established_ROCK$BNM_Review <- bnm.reviews_count_pub_year_established_ROCK$Count_BNM/
+  bnm.reviews_count_pub_year_established_ROCK$Count_Reviews
+
+# ROCK GENRE - create plot of number of reviews by establishment rating YoY
+p17 <- ggplot(data = reviews_count_pub_year_established_ROCK, aes(x = Pub_Year, y = Count_Reviews, fill = Establishment_Rating)) +       
+  geom_area(aes(group = Establishment_Rating)) + xlab('Pub_Year') + ylab("Count of Reviews") + 
+  ggtitle("ROCK GENRE: Count of Reviews by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+# ROCK GENRE - create plot of count of best new music reviews by establishment rating YoY
+p18 <- ggplot(data = bnm_count_pub_year_established_ROCK, aes(x = Pub_Year, y = Count_BNM, fill = Establishment_Rating)) +       
+  geom_area(aes(group = Establishment_Rating)) + xlab('Pub_Year') + ylab("Count of Best New Music") + 
+  ggtitle("ROCK GENRE: Count of Best New Music by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+# ROCK GENRE - create plot of percentage of BNM awards won to reviews written by genre YoY
+p19 <- ggplot(data = bnm.reviews_count_pub_year_established_ROCK, aes(x = Pub_Year, y = BNM_Review, colour = Establishment_Rating)) +       
+  geom_line(aes(group = Establishment_Rating)) + geom_point() + xlab('Pub_Year') + ylab("BNM Rate") + 
+  ggtitle("ROCK GENRE: Rate of Best New Music Awards Given by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+# display plots 17 - 19
+multiplot(p17, p18, p19, cols=1)
+
+
+
+##### Best New Music Rating YoY #####
+
+  # create dataframe of only best new music awards
+bnm_mod_era <- mod_era[mod_era$best_new_music == 1,]
+
+# add average rating by year to bnm_mod_era
+bnm_pub_year_avg_score <- as.data.frame(aggregate(bnm_mod_era[, "score"], list(bnm_mod_era$pub_year), mean))
+colnames(bnm_pub_year_avg_score) <- c('pub_year','bnm_yearly_avg_rating')
+bnm_mod_era <- merge(bnm_mod_era, bnm_pub_year_avg_score, by = 'pub_year')
+
+  # create summary table of best new music avg score by genre YoY
+bnm_avg_rating_pub_year <- as.data.frame(aggregate(bnm_mod_era[, "score"], list(bnm_mod_era$genre, bnm_mod_era$pub_year, bnm_mod_era$bnm_yearly_avg_rating), mean))
+colnames(bnm_avg_rating_pub_year) <- c('Genre','Pub_Year','Yearly_Avg_Rating_BNM','Rating_BNM')
+
+  # create summary table of best new music avg score by establishment rating YoY
+bnm_establishment_avg_rating_pub_year <- as.data.frame(aggregate(bnm_mod_era[, "score"], list(bnm_mod_era$established.rating, bnm_mod_era$pub_year, bnm_mod_era$bnm_yearly_avg_rating), mean))
+colnames(bnm_establishment_avg_rating_pub_year) <- c('Establishment_Rating','Pub_Year','Yearly_Avg_Rating_BNM','Rating_BNM')
+
+
+  # graph of best new music avg score by genre YoY
+p20 <- ggplot(data = bnm_avg_rating_pub_year, aes(x = Pub_Year, y = Rating_BNM, colour = Genre)) +       
+  geom_line(aes(group = Genre)) + geom_point() + 
+  geom_line(aes(y=Yearly_Avg_Rating_BNM), color = 'red4', linetype = 2) + xlab('Pub_Year') + ylab("Score") + 
+  ggtitle("Best New Music Avg Score by Genre YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+  # graph of best new music avg score by establishment rating YoY
+p21 <- ggplot(data = bnm_establishment_avg_rating_pub_year, aes(x = Pub_Year, y = Rating_BNM, colour = Establishment_Rating)) +       
+  geom_line(aes(group = Establishment_Rating)) + geom_point() + 
+  geom_line(aes(y=Yearly_Avg_Rating_BNM), color = 'red4', linetype = 2) + xlab('Pub_Year') + ylab("Score") + 
+  ggtitle("Best New Music Avg Score by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+multiplot(p20, p21, cols=1)
+
+
+
+##### NON-Best New Music Rating YoY #####
+
+  # create dataframe of only best new music awards
+nonbnm_mod_era <- mod_era[mod_era$best_new_music == 0,]
+
+# add average rating by year to nonbnm_mod_era
+nonbnm_pub_year_avg_score <- as.data.frame(aggregate(nonbnm_mod_era[, "score"], list(nonbnm_mod_era$pub_year), mean))
+colnames(nonbnm_pub_year_avg_score) <- c('pub_year','nonbnm_yearly_avg_rating')
+nonbnm_mod_era <- merge(nonbnm_mod_era, nonbnm_pub_year_avg_score, by = 'pub_year')
+
+# create summary table of best new music avg score by genre YoY
+nonbnm_avg_rating_pub_year <- as.data.frame(aggregate(nonbnm_mod_era[, "score"], list(nonbnm_mod_era$genre, nonbnm_mod_era$pub_year, nonbnm_mod_era$nonbnm_yearly_avg_rating), mean))
+colnames(nonbnm_avg_rating_pub_year) <- c('Genre','Pub_Year','Yearly_Avg_Rating_nonbnm','Rating_nonbnm')
+
+# create summary table of best new music avg score by establishment rating YoY
+nonbnm_establishment_avg_rating_pub_year <- as.data.frame(aggregate(nonbnm_mod_era[, "score"], list(nonbnm_mod_era$established.rating, nonbnm_mod_era$pub_year, nonbnm_mod_era$nonbnm_yearly_avg_rating), mean))
+colnames(nonbnm_establishment_avg_rating_pub_year) <- c('Establishment_Rating','Pub_Year','Yearly_Avg_Rating_nonbnm','Rating_nonbnm')
+
+
+# graph of best new music avg score by genre YoY
+p22 <- ggplot(data = nonbnm_avg_rating_pub_year, aes(x = Pub_Year, y = Rating_nonbnm, colour = Genre)) +       
+  geom_line(aes(group = Genre)) + geom_point() + 
+  geom_line(aes(y=Yearly_Avg_Rating_nonbnm), color = 'red4', linetype = 2) + xlab('Pub_Year') + ylab("Score") + 
+  ggtitle("Non-Best New Music Avg Score by Genre YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+# graph of best new music avg score by establishment rating YoY
+p23 <- ggplot(data = nonbnm_establishment_avg_rating_pub_year, aes(x = Pub_Year, y = Rating_nonbnm, colour = Establishment_Rating)) +       
+  geom_line(aes(group = Establishment_Rating)) + geom_point() + 
+  geom_line(aes(y=Yearly_Avg_Rating_nonbnm), color = 'red4', linetype = 2) + xlab('Pub_Year') + ylab("Score") + 
+  ggtitle("Non-Best New Music Avg Score by Establishment Rating YoY") + theme(plot.title = element_text(hjust = 0.5))
+
+multiplot(p22, p23, cols=1)
+
+
+
+########## Display plots ##########
+
+# Genre findings
+multiplot(p7, p3, cols=1)
+multiplot(p0, p11, cols=1)
+
+# ER findings
+multiplot(p15, p2, cols=1)
+multiplot(p1, p16, cols=1)
+
+########## Text Analysis ##########
+
+
+
+##### Numeric correlation #####
+
+# code establishment rating as a numeric variable
+mod_era$num_est.rat <- as.integer(ifelse(mod_era$established.rating == 'Established', 3, ifelse(mod_era$established.rating == 'Semi-Established', 2, 1)))
+
+  # create numberical dataframes for each class
+num_mod_era <- subset(mod_era, select = c('score', 'best_new_music', 'word_count', 'char_count', 'avg_word', 'stopwords',
+                                          'numerics', 'upper', 'sentiment', 'subjectivity', 'pub_year', 'yearly_avg_rating', 'abv_blw_yr_avg_rat','num_est.rat'))
+  # create corrplots with percentages
+require(corrplot)
+numsubcorrelation <- cor(num_mod_era)
+par(mfrow=c(1,1))
+corrplot(numsubcorrelation, method="shade", addCoef.col="black", 
+         addCoefasPercent=TRUE, shade.col=NA, tl.col="black", tl.cex = .75, 
+         tl.srt=45, order="original",insig = "p-value", type = 'lower')
+par(mfrow=c(1,1))
+
+##### Return variable importance on... #####
+
+  # create modeling df
+mod_era_model <- subset(mod_era, select = -c(author_type, label, release_year, content, num_est.rat, title, pub_date, pub_weekday, 
+                                             pub_day, pub_month, numerics, upper, yearly_avg_rating))
+
+  # convert chr to factor
+mod_era_model$artist <- as.factor(mod_era_model$artist)
+mod_era_model$author <- as.factor(mod_era_model$author)
+mod_era_model$genre <- as.factor(mod_era_model$genre)
+mod_era_model$established.rating <- as.factor(mod_era_model$established.rating)
+str(mod_era_model)
+
+  # check for missing NAs
+apply(mod_era_model, 2, function(x){any(is.na(x))})
+
+  # return baseline stats
+summary(mod_era_model)
+
+  # return variable importance on score
+rfimp1 <- randomForest(score ~ . - reviewid - author - artist - best_new_music - abv_blw_yr_avg_rat
+                       , data=mod_era_model, importance=TRUE, ntree=100, na.action = na.exclude)
+importance(rfimp1)
+varImpPlot(rfimp1)
+title('Score vs. ...')
+
+  # return variable importance on best_new_music
+rfimp2 <- randomForest(best_new_music ~ . - reviewid - author - artist - score - abv_blw_yr_avg_rat
+                       , data=mod_era_model, importance=TRUE, ntree=100, na.action = na.exclude)
+importance(rfimp2)
+varImpPlot(rfimp2)
+title('Best New Music vs. ...')
+
+  # return variable importance on abv_blw_yr_avg_rat
+rfimp3 <- randomForest(abv_blw_yr_avg_rat ~ . - reviewid - author - artist - best_new_music - score
+                       , data=mod_era_model, importance=TRUE, ntree=100, na.action = na.exclude)
+importance(rfimp3)
+varImpPlot(rfimp3)
+title('Above Avg Below Avg vs. ...')
+
+table(mod_era$genre, mod_era$best_new_music)
+
+##### Perform regression on... #####
+
+  # AOV on score
+summary(aov(score ~ . - reviewid - author - artist - best_new_music - abv_blw_yr_avg_rat, data=mod_era_model))
+summary(lm(score ~ . - reviewid - author - artist - best_new_music - abv_blw_yr_avg_rat, data=mod_era_model))
+
+  # AOV on best_new_music
+summary(aov(best_new_music ~ . - reviewid - author - artist - score - abv_blw_yr_avg_rat, data=mod_era_model))
+summary(glm(best_new_music ~ . - reviewid - author - artist - score - abv_blw_yr_avg_rat, data=mod_era_model, family = binomial()))
+
+  # AOV on abv_blw_yr_avg_rat
+summary(aov(abv_blw_yr_avg_rat ~ . + sentiment*genre - reviewid - author - artist - best_new_music - score, data=mod_era_model))
+summary(glm(abv_blw_yr_avg_rat ~ . + sentiment*genre - reviewid - author - artist - best_new_music - score, data=mod_era_model, family = binomial()))
+
+
+```
